@@ -11,7 +11,7 @@ Process:
 python3 o365fedenum.py --testfile unknown_user_list.txt --valid known_valid_username --domain tenant_domain.com --verbose
 ```
 
-![screenshot](https://raw.githubusercontent.com/knavesec/o365fedenum/master/screenshot.png)
+![screenshot](https://github.com/knavesec/o365fedenum/blob/master/screenshot.png?raw=true)
 
 
 A few notes:
